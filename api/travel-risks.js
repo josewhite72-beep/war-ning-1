@@ -90,8 +90,15 @@ function parsearFeed(xmlTexto) {
     var nivel = extraerNivel(item.category);
     if (nivel === null || nivel < 1 || nivel > 4) return; // dato con forma inválida, se descarta
 
-    var fecha = item.pubDate ? new Date(textoDe(item.pubDate)) : null;
+    var pubDateTexto = textoDe(item.pubDate);
+    var fecha = pubDateTexto ? new Date(pubDateTexto) : null;
     if (!fecha || isNaN(fecha.getTime())) return; // fecha inválida, se descarta
+
+    // El feed real casi siempre da solo el día ("Tue, 08 Sep 2026"), sin hora. Si se
+    // interpreta esa fecha como si tuviera hora, JavaScript asume medianoche UTC, y al
+    // mostrarla en la zona horaria del lector puede saltar al día anterior. Por eso se
+    // marca si el texto original SÍ traía una hora real, para no inventarla al mostrarla.
+    var tieneHora = /\d{1,2}:\d{2}/.test(pubDateTexto);
 
     var link = textoDe(item.link);
     if (!link) return; // sin enlace a la fuente, se descarta
@@ -102,6 +109,7 @@ function parsearFeed(xmlTexto) {
       country: extraerPais(titulo),
       level: nivel,
       updatedAt: fecha.toISOString(),
+      updatedAtHasTime: tieneHora,
       sourceUrl: link,
       motivos: extraerMotivos(descripcionPlano),
       motivo_original: descripcionPlano.slice(0, 400)
