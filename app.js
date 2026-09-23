@@ -26,9 +26,14 @@ function safeUrl(u) {
     }
 }
 
-function safeDate(dateStr) {
+function formatFecha(dateStr, tieneHora) {
     var t = Date.parse(dateStr);
-    return isNaN(t) ? 'fecha desconocida' : new Date(t).toLocaleDateString();
+    if (isNaN(t)) return 'fecha desconocida';
+    var d = new Date(t);
+    if (tieneHora) return d.toLocaleString();
+    // Sin hora real: se muestran los componentes en UTC, tal como los dio la fuente,
+    // para que el día no se corra hacia atrás según la zona horaria de quien lee.
+    return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(d);
 }
 
 // --- FILTRO ANTI-ESTÁTICA ---
@@ -57,19 +62,30 @@ function updateWarExampleBanner() {
 // La marca de tiempo mostrada es la del DATO más reciente recibido, no la hora del
 // dispositivo: lo que importa es saber qué tan vieja es la señal.
 
-function latestDate(data, field) {
+function ultimoDato(data, campoFecha) {
     var max = null;
     data.forEach(function (item) {
-        var t = Date.parse(item[field]);
-        if (!isNaN(t) && (max === null || t > max)) max = t;
+        var t = Date.parse(item[campoFecha]);
+        if (!isNaN(t) && (max === null || t > max.t)) max = { t: t, item: item };
     });
-    return max === null ? '--' : new Date(max).toLocaleString();
+    return max ? max.item : null;
+}
+
+function actualizarTimestampRiesgos(data) {
+    var ultimo = ultimoDato(data, 'updatedAt');
+    document.getElementById('risk-timestamp').textContent = ultimo
+        ? formatFecha(ultimo.updatedAt, !!ultimo.updatedAtHasTime)
+        : '--';
+}
+
+function actualizarTimestampGuerra(data) {
+    var ultimo = ultimoDato(data, 'date');
+    // Los reportes de guerra (mock) sí traen hora completa en su fecha.
+    document.getElementById('war-timestamp').textContent = ultimo ? formatFecha(ultimo.date, true) : '--';
 }
 
 function renderRisks(data) {
     const container = document.getElementById('risk-list');
-    document.getElementById('risk-timestamp').textContent = latestDate(data, 'updatedAt');
-
     const riskLabels = { 1: 'Ejercer precaución normal', 2: 'Mayor precaución', 3: 'Reconsiderar viaje', 4: 'No viajar' };
 
     container.innerHTML = data.map(function (item) {
@@ -78,15 +94,14 @@ function renderRisks(data) {
             '<div>' + esc(riskLabels[item.level]) + '</div>' +
             '<div class="meta">' +
                 'Fuente: <a href="' + safeUrl(item.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Dept. de Estado EE.UU.</a>' +
-                ' | Actualizado: ' + esc(safeDate(item.updatedAt)) +
+                ' | Actualizado: ' + esc(formatFecha(item.updatedAt, !!item.updatedAtHasTime)) +
             '</div>' +
         '</div>';
-    }).join('') || '<div>Sin señales válidas en este momento.</div>';
+    }).join('') || '<div class="empty-state">Sin señales que coincidan con la búsqueda.</div>';
 }
 
 function renderWars(data) {
     const container = document.getElementById('war-list');
-    document.getElementById('war-timestamp').textContent = latestDate(data, 'date');
 
     container.innerHTML = data.map(function (item) {
         return '<div class="card war-card">' +
@@ -94,16 +109,37 @@ function renderWars(data) {
             '<div>' + esc(item.description) + '</div>' +
             '<div class="meta">' +
                 'Fuente: <a href="' + safeUrl(item.sourceUrl) + '" target="_blank" rel="noopener noreferrer">UCDP</a>' +
-                ' | Fecha del suceso: ' + esc(safeDate(item.date)) +
+                ' | Fecha del suceso: ' + esc(formatFecha(item.date, true)) +
             '</div>' +
         '</div>';
-    }).join('') || '<div>Sin señales válidas en este momento.</div>';
+    }).join('') || '<div class="empty-state">Sin señales que coincidan con la búsqueda.</div>';
 }
 
 function renderError(containerId, timestampId) {
     document.getElementById(timestampId).textContent = '--';
     document.getElementById(containerId).innerHTML =
         '<div class="error-card">No se pudo recibir la señal. Verifica tu conexión e inténtalo de nuevo más tarde.</div>';
+}
+
+// --- BÚSQUEDA POR PAÍS (filtra lo que ya se recibió; no vuelve a pedir datos) ---
+
+var ultimosRiesgos = [];
+var ultimasGuerras = [];
+
+function normalizarTexto(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function aplicarBusquedaRiesgos() {
+    var q = normalizarTexto(document.getElementById('risk-search').value);
+    var filtrados = q ? ultimosRiesgos.filter(function (p) { return normalizarTexto(p.country).indexOf(q) !== -1; }) : ultimosRiesgos;
+    renderRisks(filtrados);
+}
+
+function aplicarBusquedaGuerras() {
+    var q = normalizarTexto(document.getElementById('war-search').value);
+    var filtrados = q ? ultimasGuerras.filter(function (p) { return normalizarTexto(p.location).indexOf(q) !== -1; }) : ultimasGuerras;
+    renderWars(filtrados);
 }
 
 // --- RECEPCIÓN DE DATOS ---
@@ -115,10 +151,12 @@ async function fetchTravelRisks() {
         const raw = await response.json();
         if (!Array.isArray(raw)) throw new Error('Formato de datos inválido');
 
-        const cleanData = raw.filter(isValidRisk);
-        renderRisks(cleanData);
+        ultimosRiesgos = raw.filter(isValidRisk);
+        actualizarTimestampRiesgos(ultimosRiesgos);
+        aplicarBusquedaRiesgos();
     } catch (err) {
         console.error('Error recibiendo avisos de viaje:', err);
+        ultimosRiesgos = [];
         renderError('risk-list', 'risk-timestamp');
     }
 }
@@ -134,13 +172,18 @@ async function fetchWarReports() {
         // En producción: const response = await fetch(API_WAR_REPORTS); if (!response.ok) throw new Error('HTTP ' + response.status); const raw = await response.json();
         const raw = mockResponse;
 
-        const cleanData = raw.filter(isValidWarReport);
-        renderWars(cleanData);
+        ultimasGuerras = raw.filter(isValidWarReport);
+        actualizarTimestampGuerra(ultimasGuerras);
+        aplicarBusquedaGuerras();
     } catch (err) {
         console.error('Error recibiendo reportes de conflicto:', err);
+        ultimasGuerras = [];
         renderError('war-list', 'war-timestamp');
     }
 }
+
+document.getElementById('risk-search').addEventListener('input', aplicarBusquedaRiesgos);
+document.getElementById('war-search').addEventListener('input', aplicarBusquedaGuerras);
 
 // --- NAVEGACIÓN Y CICLO DE VIDA ---
 
