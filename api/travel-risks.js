@@ -118,6 +118,51 @@ function parsearFeed(xmlTexto) {
   return paises;
 }
 
+function fusionarRondas(listasDeRondas) {
+  // Se queda, por país, con la entrada de fecha más reciente entre todas las rondas
+  // descargadas. Protección parcial contra el feed real, que a veces devuelve en una
+  // sola consulta una copia vieja de un aviso mezclada con el resto de datos actuales
+  // (visto en producción: Colombia con fecha de 2025 en vez de marzo de 2026). Esta
+  // función NO recuerda nada entre una visita y la siguiente (esta función serverless
+  // no guarda estado), así que no es una garantía absoluta de "nunca retroceder en el
+  // tiempo" como la que sí podía dar el proyecto original con su propio historial.
+  var porPais = {};
+  listasDeRondas.forEach(function (ronda) {
+    ronda.forEach(function (pais) {
+      var t = Date.parse(pais.updatedAt);
+      var actual = porPais[pais.country];
+      if (!actual || t > Date.parse(actual.updatedAt)) porPais[pais.country] = pais;
+    });
+  });
+  return Object.keys(porPais).map(function (nombre) { return porPais[nombre]; });
+}
+
+function esperar(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+// Número de descargas y pausa entre ellas. Vercel corta la función si tarda más de
+// ~10s en el plan gratuito, así que se mantiene deliberadamente corto: 3 rondas con
+// una pausa breve, en vez de las 4 rondas con pausas de 4s que usaba el proyecto
+// original (ese sí corría dentro de GitHub Actions, sin ese límite de tiempo).
+var RONDAS = 3;
+var PAUSA_MS = 1200;
+
+async function descargarUnaRonda(numero) {
+  try {
+    var respuesta = await fetch(FEED_URL);
+    if (!respuesta.ok) {
+      console.error('Ronda ' + numero + ': la fuente respondió con estado ' + respuesta.status);
+      return [];
+    }
+    var xmlTexto = await respuesta.text();
+    return parsearFeed(xmlTexto);
+  } catch (err) {
+    console.error('Ronda ' + numero + ': fallo al descargar o interpretar el feed:', err);
+    return [];
+  }
+}
+
 // Handler de Vercel: corre en el servidor, no en el navegador del visitante,
 // así que la petición a travel.state.gov no choca con la política de CORS.
 module.exports = async function handler(req, res) {
@@ -125,13 +170,26 @@ module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate'); // 30 min, igual que el intervalo de la app
 
   try {
-    var respuesta = await fetch(FEED_URL);
-    if (!respuesta.ok) {
-      res.status(502).json({ error: 'La fuente respondió con un error', status: respuesta.status });
+    var rondas = [];
+    for (var i = 1; i <= RONDAS; i++) {
+      rondas.push(await descargarUnaRonda(i));
+      if (i < RONDAS) await esperar(PAUSA_MS);
+    }
+
+    var rondasConDatos = rondas.filter(function (r) { return r.length > 0; });
+    if (rondasConDatos.length === 0) {
+      res.status(502).json({ error: 'La fuente no respondió con datos válidos en ninguna de las ' + RONDAS + ' rondas' });
       return;
     }
-    var xmlTexto = await respuesta.text();
-    var paises = parsearFeed(xmlTexto);
+
+    var paises = fusionarRondas(rondasConDatos);
+
+    // Registro visible en los logs de Vercel (Deployments > Functions), útil para
+    // verificar si alguna ronda trajo datos distintos a las otras, sin cambiar la
+    // forma de la respuesta que recibe la app.
+    console.log('Rondas con datos: ' + rondasConDatos.length + '/' + RONDAS +
+      ' · países por ronda: [' + rondasConDatos.map(function (r) { return r.length; }).join(', ') +
+      '] · países tras la fusión: ' + paises.length);
 
     if (paises.length < 50) {
       // Protección mínima: si el feed devolviera casi nada, es más probable
@@ -150,3 +208,4 @@ module.exports = async function handler(req, res) {
 // con Node fuera de Vercel (como ya se hizo antes de entregar este archivo).
 module.exports.parsearFeed = parsearFeed;
 module.exports.extraerMotivos = extraerMotivos;
+module.exports.fusionarRondas = fusionarRondas;
