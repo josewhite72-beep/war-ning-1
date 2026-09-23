@@ -1,11 +1,9 @@
 // --- SINTONIZANDO SEÑALES ---
-// Avisos de viaje: YA conectados a datos reales, vía la función propia en /api/travel-risks
-// (evita el bloqueo de CORS de travel.state.gov). Reportes de guerra: TODAVÍA simulados,
-// mientras se investiga el acceso a UCDP. EJEMPLO_WAR controla el aviso visible de esa pestaña.
-const EJEMPLO_WAR = true;
+// Las dos pestañas ya están conectadas a datos reales, cada una por su función propia en el
+// servidor (evita el bloqueo de CORS de las fuentes originales, travel.state.gov y UCDP).
 
 const API_TRAVEL_RISKS = '/api/travel-risks';
-const API_WAR_REPORTS = 'https://api.mockaroo.com/api/war-reports'; // Simulado
+const API_WAR_REPORTS = '/api/war-reports';
 
 // --- UTILIDADES DE SEGURIDAD ---
 // Todo texto que venga de una fuente externa pasa por esc() antes de insertarse en el DOM.
@@ -46,16 +44,10 @@ function isValidRisk(dato) {
     return nivelesValidos.includes(dato.level) && fechaValida && dato.country && dato.sourceUrl;
 }
 
+var TIPOS_VALIDOS = ['conflicto_estatal', 'conflicto_no_estatal', 'violencia_unilateral'];
 function isValidWarReport(dato) {
-    const fechaValida = !isNaN(new Date(dato.date).getTime());
-    return fechaValida && dato.location && dato.description;
-}
-
-// --- BANNER DE EJEMPLO ---
-
-function updateWarExampleBanner() {
-    var banner = document.getElementById('war-example-banner');
-    if (banner) banner.hidden = !EJEMPLO_WAR;
+    const fechaValida = !isNaN(new Date(dato.fecha).getTime());
+    return fechaValida && dato.pais && dato.lugar && TIPOS_VALIDOS.includes(dato.tipo);
 }
 
 // --- RENDERIZADO PASIVO ---
@@ -79,9 +71,8 @@ function actualizarTimestampRiesgos(data) {
 }
 
 function actualizarTimestampGuerra(data) {
-    var ultimo = ultimoDato(data, 'date');
-    // Los reportes de guerra (mock) sí traen hora completa en su fecha.
-    document.getElementById('war-timestamp').textContent = ultimo ? formatFecha(ultimo.date, true) : '--';
+    var ultimo = ultimoDato(data, 'fecha');
+    document.getElementById('war-timestamp').textContent = ultimo ? formatFecha(ultimo.fecha, false) : '--';
 }
 
 function renderRisks(data) {
@@ -100,16 +91,30 @@ function renderRisks(data) {
     }).join('') || '<div class="empty-state">Sin señales que coincidan con la búsqueda.</div>';
 }
 
+var fuenteGuerra = { nombre: 'UCDP', url: 'https://ucdp.uu.se/downloads/candidateged/' };
+// UCDP no da un enlace por cada evento (solo cita el medio de prensa, y eso se omite a
+// propósito de esta app). El enlace de "Fuente" es el mismo para todas las tarjetas.
+
+var TIPO_LABELS = {
+    'conflicto_estatal': 'Conflicto estatal',
+    'conflicto_no_estatal': 'Conflicto no estatal',
+    'violencia_unilateral': 'Violencia unilateral'
+};
+
 function renderWars(data) {
     const container = document.getElementById('war-list');
+    const srcHref = safeUrl(fuenteGuerra.url);
 
     container.innerHTML = data.map(function (item) {
+        var muertesTxt = (typeof item.muertes_reportadas === 'number')
+            ? item.muertes_reportadas + (item.muertes_reportadas === 1 ? ' muerte reportada' : ' muertes reportadas')
+            : 'Muertes reportadas: sin confirmar';
         return '<div class="card war-card">' +
-            '<h3>' + esc(item.location) + '</h3>' +
-            '<div>' + esc(item.description) + '</div>' +
+            '<h3>' + esc(item.lugar) + '</h3>' +
+            '<div>' + esc(TIPO_LABELS[item.tipo] || item.tipo) + ' · ' + esc(muertesTxt) + '</div>' +
             '<div class="meta">' +
-                'Fuente: <a href="' + safeUrl(item.sourceUrl) + '" target="_blank" rel="noopener noreferrer">UCDP</a>' +
-                ' | Fecha del suceso: ' + esc(formatFecha(item.date, true)) +
+                'Fuente: <a href="' + srcHref + '" target="_blank" rel="noopener noreferrer">' + esc(fuenteGuerra.nombre) + '</a>' +
+                ' | Fecha del suceso: ' + esc(formatFecha(item.fecha, false)) +
             '</div>' +
         '</div>';
     }).join('') || '<div class="empty-state">Sin señales que coincidan con la búsqueda.</div>';
@@ -138,7 +143,9 @@ function aplicarBusquedaRiesgos() {
 
 function aplicarBusquedaGuerras() {
     var q = normalizarTexto(document.getElementById('war-search').value);
-    var filtrados = q ? ultimasGuerras.filter(function (p) { return normalizarTexto(p.location).indexOf(q) !== -1; }) : ultimasGuerras;
+    var filtrados = q ? ultimasGuerras.filter(function (p) {
+        return normalizarTexto(p.pais).indexOf(q) !== -1 || normalizarTexto(p.lugar).indexOf(q) !== -1;
+    }) : ultimasGuerras;
     renderWars(filtrados);
 }
 
@@ -163,16 +170,14 @@ async function fetchTravelRisks() {
 
 async function fetchWarReports() {
     try {
-        // Simulación de respuesta UCDP — datos de ejemplo, no eventos reales
-        const mockResponse = [
-            { location: "Zona de ejemplo A (dato ficticio)", description: "Descripción de ejemplo para probar el diseño de la tarjeta.", date: "2023-10-10T08:00:00Z", sourceUrl: "https://ucdp.uu.se/" },
-            { location: "Zona de ejemplo B (dato ficticio)", description: "Segunda descripción de ejemplo, sin relación con hechos reales.", date: "2023-10-05T09:30:00Z", sourceUrl: "https://ucdp.uu.se/" }
-        ];
+        const response = await fetch(API_WAR_REPORTS);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        if (!data || !Array.isArray(data.eventos)) throw new Error('Formato de datos inválido');
 
-        // En producción: const response = await fetch(API_WAR_REPORTS); if (!response.ok) throw new Error('HTTP ' + response.status); const raw = await response.json();
-        const raw = mockResponse;
+        if (data.fuente && data.fuente.nombre && data.fuente.url) fuenteGuerra = data.fuente;
 
-        ultimasGuerras = raw.filter(isValidWarReport);
+        ultimasGuerras = data.eventos.filter(isValidWarReport);
         actualizarTimestampGuerra(ultimasGuerras);
         aplicarBusquedaGuerras();
     } catch (err) {
@@ -198,7 +203,6 @@ document.querySelectorAll('#tabs button').forEach(function (btn) {
 
 // Sintonizar al abrir y cada 30 minutos (auto-update sin intervención)
 function init() {
-    updateWarExampleBanner();
     fetchTravelRisks();
     fetchWarReports();
     setInterval(fetchTravelRisks, 1800000);
