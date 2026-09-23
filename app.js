@@ -135,16 +135,62 @@ function normalizarTexto(s) {
     return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Nombres en español de los países cuyo nombre en inglés (el que traen las fuentes) es
+// notablemente distinto. Solo cubre los casos donde de verdad hace falta una traducción;
+// los países cuyo nombre ya se escribe casi igual en los dos idiomas no están aquí, porque
+// normalizarTexto() ya les quita los acentos y los iguala. Las claves están ya normalizadas
+// (minúsculas, sin acentos) para comparar directo contra el nombre que llega de la fuente.
+var NOMBRES_ES = {
+    'afghanistan': 'afganistan', 'algeria': 'argelia', 'antigua and barbuda': 'antigua y barbuda',
+    'azerbaijan': 'azerbaiyan', 'bahrain': 'bahrein', 'belarus': 'bielorrusia', 'belgium': 'belgica',
+    'bhutan': 'butan', 'bosnia and herzegovina': 'bosnia y herzegovina', 'brazil': 'brasil',
+    'cambodia': 'camboya', 'cameroon': 'camerun', 'central african republic': 'republica centroafricana',
+    'comoros': 'comoras', 'democratic republic of the congo': 'republica democratica del congo',
+    'cote d\'ivoire': 'costa de marfil', 'croatia': 'croacia', 'cyprus': 'chipre',
+    'czechia': 'republica checa', 'denmark': 'dinamarca', 'djibouti': 'yibuti',
+    'dominican republic': 'republica dominicana', 'egypt': 'egipto', 'equatorial guinea': 'guinea ecuatorial',
+    'eswatini': 'esuatini', 'ethiopia': 'etiopia', 'finland': 'finlandia', 'france': 'francia',
+    'germany': 'alemania', 'greece': 'grecia', 'grenada': 'granada', 'hungary': 'hungria',
+    'iceland': 'islandia', 'iraq': 'irak', 'ireland': 'irlanda', 'italy': 'italia', 'japan': 'japon',
+    'jordan': 'jordania', 'kazakhstan': 'kazajistan', 'kyrgyzstan': 'kirguistan', 'laos': 'laos',
+    'latvia': 'letonia', 'lebanon': 'libano', 'libya': 'libia', 'lithuania': 'lituania',
+    'luxembourg': 'luxemburgo', 'macau': 'macao', 'malaysia': 'malasia', 'maldives': 'maldivas',
+    'marshall islands': 'islas marshall', 'mauritius': 'mauricio', 'morocco': 'marruecos',
+    'myanmar (burma)': 'myanmar (birmania)', 'netherlands': 'paises bajos', 'new zealand': 'nueva zelanda',
+    'north korea': 'corea del norte', 'north macedonia': 'macedonia del norte', 'norway': 'noruega',
+    'papua new guinea': 'papua nueva guinea', 'philippines': 'filipinas', 'poland': 'polonia',
+    'romania': 'rumania', 'russia': 'rusia', 'saint kitts and nevis': 'san cristobal y nieves',
+    'saint lucia': 'santa lucia', 'saint vincent and the grenadines': 'san vicente y las granadinas',
+    'sao tome and principe': 'santo tome y principe', 'saudi arabia': 'arabia saudita',
+    'sierra leone': 'sierra leona', 'singapore': 'singapur', 'slovakia': 'eslovaquia',
+    'slovenia': 'eslovenia', 'solomon islands': 'islas salomon', 'south africa': 'sudafrica',
+    'south korea': 'corea del sur', 'south sudan': 'sudan del sur', 'spain': 'espana',
+    'sri lanka': 'sri lanka', 'sweden': 'suecia', 'switzerland': 'suiza', 'syria': 'siria',
+    'tajikistan': 'tayikistan', 'thailand': 'tailandia', 'timor-leste': 'timor oriental',
+    'trinidad and tobago': 'trinidad y tobago', 'tunisia': 'tunez', 'turkey': 'turquia',
+    'ukraine': 'ucrania', 'united arab emirates': 'emiratos arabes unidos',
+    'united kingdom': 'reino unido', 'vietnam': 'vietnam'
+};
+
+function nombreEsExtra(nombrePais) {
+    return NOMBRES_ES[normalizarTexto(nombrePais)] || '';
+}
+
+function coincideBusqueda(nombrePais, q) {
+    var n = normalizarTexto(nombrePais);
+    return n.indexOf(q) !== -1 || nombreEsExtra(nombrePais).indexOf(q) !== -1;
+}
+
 function aplicarBusquedaRiesgos() {
     var q = normalizarTexto(document.getElementById('risk-search').value);
-    var filtrados = q ? ultimosRiesgos.filter(function (p) { return normalizarTexto(p.country).indexOf(q) !== -1; }) : ultimosRiesgos;
+    var filtrados = q ? ultimosRiesgos.filter(function (p) { return coincideBusqueda(p.country, q); }) : ultimosRiesgos;
     renderRisks(filtrados);
 }
 
 function aplicarBusquedaGuerras() {
     var q = normalizarTexto(document.getElementById('war-search').value);
     var filtrados = q ? ultimasGuerras.filter(function (p) {
-        return normalizarTexto(p.pais).indexOf(q) !== -1 || normalizarTexto(p.lugar).indexOf(q) !== -1;
+        return coincideBusqueda(p.pais, q) || normalizarTexto(p.lugar).indexOf(q) !== -1;
     }) : ultimasGuerras;
     renderWars(filtrados);
 }
