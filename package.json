@@ -1,0 +1,8 @@
+{
+  "name": "war-ning",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0"
+  }
+}

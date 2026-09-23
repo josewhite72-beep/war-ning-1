@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAR-NING</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#111111">
+</head>
+<body>
+    <header>
+        <h1>WAR-NING</h1>
+        <p>Receptor de avisos. Sin filtros, sin opiniones.</p>
+    </header>
+
+    <nav id="tabs">
+        <button class="active" data-target="travel-risks">Evitar al Viajar</button>
+        <button data-target="war-reports">Reportes de Guerra</button>
+    </nav>
+
+    <main>
+        <section id="travel-risks" class="panel active">
+            <div class="status-bar">Última señal: <span id="risk-timestamp">--</span></div>
+            <div id="risk-list" class="alert-container">Sintonizando señal...</div>
+        </section>
+
+        <section id="war-reports" class="panel">
+            <div id="war-example-banner" class="example-banner" hidden>
+                ⚠ Datos de ejemplo — esta pestaña todavía no está conectada a una fuente real (UCDP).
+            </div>
+            <div class="status-bar">Última señal: <span id="war-timestamp">--</span></div>
+            <div id="war-list" class="alert-container">Sintonizando señal...</div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
